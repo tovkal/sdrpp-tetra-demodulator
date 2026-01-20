@@ -77,6 +77,9 @@ namespace dsp {
             tms->put_voice_data_ctx = this;
             tms->last_frame = 0;
             tms->curr_active_timeslot = 0;
+            for (int i = 0; i < 4; i++) {
+                tms->timeslot_enabled[i] = true;
+            }
 
             Init_Decod_Tetra();
 
@@ -108,6 +111,12 @@ namespace dsp {
         }
         int getTimeslotContent(int ts) { //0-other, 1-NORM1, 2-NORM2, 3-SYNC, 4-VOICE
             return tms->t_display_st->timeslot_content[ts];
+        }
+        bool getTimeslotEnabled(int ts) {
+            return (ts >= 0 && ts < 4) ? tms->timeslot_enabled[ts] : false;
+        }
+        void setTimeslotEnabled(int ts, bool enabled) {
+            if (ts >= 0 && ts < 4) tms->timeslot_enabled[ts] = enabled;
         }
         int getDlUsage() {
             return tms->t_display_st->dl_usage;

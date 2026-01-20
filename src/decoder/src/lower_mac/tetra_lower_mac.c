@@ -362,12 +362,18 @@ void tp_sap_udata_ind(enum tp_sap_data_type type, int blk_num, const uint8_t *bi
 			Decod_Tetra(parm, synth_p2);		/* decoder */
 			Post_Process(synth_p2, (int16_t)240);	/* Post processing of synthesis  */
 			//USE SYNTH
-			if(tms->t_display_st->curr_frame != tms->last_frame) {
-				tms->curr_active_timeslot = t_phy_state.time.tn;
-				tms->last_frame = tms->t_display_st->curr_frame;
-			}
-			if(tms->curr_active_timeslot == t_phy_state.time.tn) {
-				tms->put_voice_data(tms->put_voice_data_ctx, 480, synth);
+			int current_tn = t_phy_state.time.tn;
+			int tn_index = current_tn - 1;
+
+			// Only process if timeslot is enabled
+			if (tn_index >= 0 && tn_index < 4 && tms->timeslot_enabled[tn_index]) {
+				if(tms->t_display_st->curr_frame != tms->last_frame) {
+					tms->curr_active_timeslot = current_tn;
+					tms->last_frame = tms->t_display_st->curr_frame;
+				}
+				if(tms->curr_active_timeslot == current_tn) {
+					tms->put_voice_data(tms->put_voice_data_ctx, 480, synth);
+				}
 			}
 		}
 		break;

@@ -319,7 +319,8 @@ struct tetra_mac_state {
 	void* put_voice_data_ctx;
 	int last_frame;
 	int curr_active_timeslot;
-	
+	bool timeslot_enabled[4];  // Index 0-3 for slots 1-4
+
 	struct fragslot* fragslots;
 };
 

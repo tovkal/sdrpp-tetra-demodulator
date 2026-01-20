@@ -70,6 +70,13 @@ public:
         strcpy(hostname, std::string(config.conf[name]["hostname"]).c_str());
         port = config.conf[name]["port"];
         bool startNow = config.conf[name]["sending"];
+        if (config.conf[name].contains("timeslot_enabled")) {
+            for (int i = 0; i < 4; i++) {
+                if (config.conf[name]["timeslot_enabled"].size() > (size_t)i) {
+                    timeslotEnabled[i] = config.conf[name]["timeslot_enabled"][i];
+                }
+            }
+        }
         config.release(true);
 
         vfo = sigpath::vfoManager.createVFO(name, ImGui::WaterfallVFO::REF_CENTER, 0, VFO_BANDWIDTH, VFO_SAMPLERATE, VFO_BANDWIDTH, VFO_BANDWIDTH, true);
@@ -93,6 +100,9 @@ public:
         demodSink.init(&bitsUnpacker.out, _demodSinkHandler, this);
 
         osmotetradecoder.init(&bitsUnpacker.out);
+        for (int i = 0; i < 4; i++) {
+            osmotetradecoder.setTimeslotEnabled(i, timeslotEnabled[i]);
+        }
         resamp.init(&osmotetradecoder.out, 8000.0, audioSampleRate);
         outconv.init(&resamp.out);
 
@@ -268,6 +278,18 @@ private:
                         ImGui::SameLine();
                         ImGui::TextColored(ImVec4(0.05, 0.95, 0.05, 1.0), " VOICE ");
                         break;
+                }
+            }
+            ImGui::Text("Enable slots:");
+            for (int i = 0; i < 4; i++) {
+                ImGui::SameLine();
+                bool enabled = _this->timeslotEnabled[i];
+                if (ImGui::Checkbox(CONCAT(std::to_string(i+1).c_str(), std::string("##_ts_en_" + std::to_string(i) + "_" + _this->name).c_str()), &enabled)) {
+                    _this->timeslotEnabled[i] = enabled;
+                    _this->osmotetradecoder.setTimeslotEnabled(i, enabled);
+                    config.acquire();
+                    config.conf[_this->name]["timeslot_enabled"][i] = enabled;
+                    config.release(true);
                 }
             }
             int crc_failed = _this->osmotetradecoder.getLastCrcFail();
@@ -450,6 +472,7 @@ private:
 
 
     int decoder_mode = 0;
+    bool timeslotEnabled[4] = {true, true, true, true};
 
 
     //Sequences from osmo-tetra-sq5bpf source
