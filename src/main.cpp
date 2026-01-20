@@ -70,12 +70,8 @@ public:
         strcpy(hostname, std::string(config.conf[name]["hostname"]).c_str());
         port = config.conf[name]["port"];
         bool startNow = config.conf[name]["sending"];
-        if (config.conf[name].contains("timeslot_enabled")) {
-            for (int i = 0; i < 4; i++) {
-                if (config.conf[name]["timeslot_enabled"].size() > (size_t)i) {
-                    timeslotEnabled[i] = config.conf[name]["timeslot_enabled"][i];
-                }
-            }
+        if (config.conf[name].contains("focused_slot")) {
+            focusedSlot = config.conf[name]["focused_slot"];
         }
         config.release(true);
 
@@ -100,9 +96,7 @@ public:
         demodSink.init(&bitsUnpacker.out, _demodSinkHandler, this);
 
         osmotetradecoder.init(&bitsUnpacker.out);
-        for (int i = 0; i < 4; i++) {
-            osmotetradecoder.setTimeslotEnabled(i, timeslotEnabled[i]);
-        }
+        applyFocusedSlot();
         resamp.init(&osmotetradecoder.out, 8000.0, audioSampleRate);
         outconv.init(&resamp.out);
 
@@ -206,6 +200,12 @@ private:
         config.release(true);
     }
 
+    void applyFocusedSlot() {
+        for (int i = 0; i < 4; i++) {
+            osmotetradecoder.setTimeslotEnabled(i, focusedSlot == 0 || focusedSlot == (i + 1));
+        }
+    }
+
     static void menuHandler(void* ctx) {
         TetraDemodulatorModule* _this = (TetraDemodulatorModule*)ctx;
         float menuWidth = ImGui::GetContentRegionAvail().x;
@@ -280,15 +280,22 @@ private:
                         break;
                 }
             }
-            ImGui::Text("Enable slots:");
-            for (int i = 0; i < 4; i++) {
+            ImGui::Text("Focus slot:");
+            ImGui::SameLine();
+            if (ImGui::RadioButton(CONCAT("All##_ts_focus_", _this->name), _this->focusedSlot == 0)) {
+                _this->focusedSlot = 0;
+                _this->applyFocusedSlot();
+                config.acquire();
+                config.conf[_this->name]["focused_slot"] = _this->focusedSlot;
+                config.release(true);
+            }
+            for (int i = 1; i <= 4; i++) {
                 ImGui::SameLine();
-                bool enabled = _this->timeslotEnabled[i];
-                if (ImGui::Checkbox(CONCAT(std::to_string(i+1).c_str(), std::string("##_ts_en_" + std::to_string(i) + "_" + _this->name).c_str()), &enabled)) {
-                    _this->timeslotEnabled[i] = enabled;
-                    _this->osmotetradecoder.setTimeslotEnabled(i, enabled);
+                if (ImGui::RadioButton(CONCAT(std::to_string(i).c_str(), std::string("##_ts_focus_" + std::to_string(i) + "_" + _this->name).c_str()), _this->focusedSlot == i)) {
+                    _this->focusedSlot = i;
+                    _this->applyFocusedSlot();
                     config.acquire();
-                    config.conf[_this->name]["timeslot_enabled"][i] = enabled;
+                    config.conf[_this->name]["focused_slot"] = _this->focusedSlot;
                     config.release(true);
                 }
             }
@@ -472,7 +479,7 @@ private:
 
 
     int decoder_mode = 0;
-    bool timeslotEnabled[4] = {true, true, true, true};
+    int focusedSlot = 0;  // 0 = All slots, 1-4 = specific slot only
 
 
     //Sequences from osmo-tetra-sq5bpf source
