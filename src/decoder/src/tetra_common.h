@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include "tetra_mac_pdu.h"
 #include <stdbool.h>
+
+/* Forward declaration for call tracker */
+struct tetra_call_tracker;
 #include <inttypes.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -293,6 +296,7 @@ struct tetra_display_state {
 	bool priority_cell;
 	bool dereg_mandatory;
 	bool reg_mandatory;
+	bool timeslot_encrypted[4]; /* Per-timeslot encryption status for UI */
 };
 
 struct tetra_mac_state {
@@ -311,16 +315,21 @@ struct tetra_mac_state {
 	int tsn;	/* Timeslon number */
 	int usage_marker; /* Usage marker (if addressed)*/
 	int addr_type;
-	
+
 	struct tetra_display_state *t_display_st;
 	bool codec_first_pass;
-	
+
 	void (*put_voice_data)(void* ctx, int count, int16_t* data);
 	void* put_voice_data_ctx;
 	int last_frame;
 	int curr_active_timeslot;
-	
+
 	struct fragslot* fragslots;
+
+	/* Call tracker for mute encrypted calls feature */
+	struct tetra_call_tracker *call_tracker;
+	uint8_t cur_encryption_mode;  /* Current MAC encryption mode for CMCE parsing */
+	int cur_timeslot;             /* Current timeslot being processed */
 };
 
 extern struct tetra_display_state t_display_state;

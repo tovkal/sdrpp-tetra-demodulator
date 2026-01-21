@@ -41,6 +41,7 @@
 #include "tetra_upper_mac.h"
 #include <lower_mac/viterbi.h>
 #include <crypto/tetra_crypto.h>
+#include "tetra_call_tracker.h"
 
 #include "c-code/channel.h"
 #include "c-code/source.h"
@@ -285,88 +286,142 @@ void tp_sap_udata_ind(enum tp_sap_data_type type, int blk_num, const uint8_t *bi
 		tup->lchan = TETRA_LC_SCH_F;
 		//Process voice frame
 		if (tms->cur_burst.is_traffic) {
-			int16_t block[690];
-			/* Generate a block */
-			memset(block, 0x00, sizeof(int16_t) * 690);
-			for (int i = 0; i < 6; i++)
-				block[115*i] = 0x6b21 + i;
-   
-			for (int i = 0; i < 114; i++)
-				block[1+i] = type4[i] ? -127 : 127;
-   
-			for (int i = 0; i < 114; i++)
-				block[116+i] = type4[114+i] ? -127 : 127;
-   
-			for (int i = 0; i < 114; i++)
-				block[231+i] = type4[228+i] ? -127 : 127;
-   
-			for (int i = 0; i < 90; i++)
-				block[346+i] = type4[342+i] ? -127 : 127;
-			
-			//i'm not sure this is legal, but i don't want to make temp files and execute external programs so
-			
-			//decoding the speech using the etsi codec
-			
-			int16_t interleaved_coded_array[432]; /*time-slot length at 7.2 kb/s*/
-			int16_t  Coded_array[432];
-			int16_t  Reordered_array[286];   /* 2 frames vocoder + 8 + 4 */
-			//block1
-			for(int i = 0; i < 114; i++) {
-				interleaved_coded_array[0+i] = block[1+i];
+			/* First, determine if we should decode and output this timeslot.
+			 * The ETSI codec has global state that gets corrupted when decoding
+			 * multiple timeslots interleaved, so we MUST skip decoding for
+			 * timeslots we won't output. */
+			int current_ts = t_phy_state.time.tn - 1; /* Convert 1-4 to 0-3 */
+			bool should_decode = false;
+			bool use_fallback = false;
+			bool is_encrypted = false;
+
+			/* Check if this timeslot should be decoded */
+			if (tms->call_tracker && current_ts >= 0 && current_ts < 4) {
+				is_encrypted = !tetra_call_tracker_is_clear(tms->call_tracker, current_ts);
+				int selected_ts = tetra_call_tracker_select_timeslot(tms->call_tracker);
+				enum tetra_call_state ts_state = tetra_call_tracker_get_state(tms->call_tracker, current_ts);
+
+				fprintf(stderr, "[MUTE_DEBUG] voice_out: TS=%d is_encr=%d selected_ts=%d mute=%d state=%d\n",
+					current_ts, is_encrypted, selected_ts,
+					tms->call_tracker->mute_encrypted,
+					(int)ts_state);
+
+				if (selected_ts >= 0) {
+					/* A timeslot was selected - only decode if this is the one */
+					if (selected_ts == current_ts) {
+						should_decode = true;
+					} else {
+						fprintf(stderr, "[MUTE_DEBUG] TS=%d not selected (selected=%d), skipping decode\n", current_ts, selected_ts);
+					}
+				} else if (tms->call_tracker->mute_encrypted) {
+					/* Mute is enabled and no timeslot was selected.
+					 * This means either all tracked calls are encrypted, or no calls are tracked yet.
+					 * In BOTH cases, we should NOT output voice when mute is enabled:
+					 * - If tracked calls exist but all encrypted: mute them
+					 * - If no tracked calls yet (state=IDLE): wait for encryption info before outputting
+					 * This may cause a brief silence at the start of clear calls, but ensures
+					 * encrypted calls are never heard. */
+					fprintf(stderr, "[MUTE_DEBUG] MUTING: mute enabled, no clear call selected, TS=%d state=%d, skipping decode\n",
+						current_ts, (int)ts_state);
+				} else {
+					/* Mute disabled, no timeslot selected - use fallback */
+					use_fallback = true;
+				}
+			} else {
+				/* No call tracker - use fallback */
+				use_fallback = true;
 			}
-			//block2
-			for(int i = 0; i < 114; i++) {
-				interleaved_coded_array[114+i] = block[(161-45)+i];
-			}
-			//block3
-			for(int i = 0; i < 114; i++) {
-				interleaved_coded_array[(114*2)+i] = block[(321-45-45)+i];
-			}
-			//block4
-			for(int i = 0; i < 90; i++) {
-				interleaved_coded_array[(114*3)+i] = block[(481-45-45-45)+i];
-			}
-			
-			for(int i = 0; i < 432; i++) {
-				if((interleaved_coded_array[i] & 0x0080) == 0x0080) {
-					interleaved_coded_array[i] = interleaved_coded_array[i] | 0xFF00;
+
+			if (use_fallback) {
+				/* Fallback to original "first voice wins" behavior */
+				if (tms->t_display_st->curr_frame != tms->last_frame) {
+					tms->curr_active_timeslot = t_phy_state.time.tn;
+					tms->last_frame = tms->t_display_st->curr_frame;
+				}
+				if (tms->curr_active_timeslot == t_phy_state.time.tn) {
+					should_decode = true;
+					fprintf(stderr, "[MUTE_DEBUG] fallback: TS=%d\n", current_ts);
 				}
 			}
-			Desinterleaving_Speech(interleaved_coded_array, Coded_array);
-			bool corrupted = Channel_Decoding(tms->codec_first_pass, 0, Coded_array, Reordered_array);
-			tms->codec_first_pass = false;
-			int16_t cdecoder_output[276];
-			cdecoder_output[0] = corrupted;
-			for(int i = 0; i < 137; i++) {
-				cdecoder_output[1+i] = Reordered_array[i];
-			}
-			cdecoder_output[138] = corrupted;
-			for(int i = 0; i < 137; i++) {
-				cdecoder_output[139+i] = Reordered_array[137+i];
-			}
-			
-			int16_t parm[24];
-			int16_t synth[480];
-			int16_t* synth_p2 = &(synth[240]);
-			int16_t serial[138];
-			for(int i = 0; i < 138; i++) {
-				serial[i] = cdecoder_output[i];
-			}
-			Bits2prm_Tetra(serial, parm);	/* serial to parameters */
-			Decod_Tetra(parm, synth);		/* decoder */
-			Post_Process(synth, (int16_t)240);	/* Post processing of synthesis  */
-			for(int i = 0; i < 138; i++) {
-				serial[i] = cdecoder_output[i+138];
-			}
-			Bits2prm_Tetra(serial, parm);	/* serial to parameters */
-			Decod_Tetra(parm, synth_p2);		/* decoder */
-			Post_Process(synth_p2, (int16_t)240);	/* Post processing of synthesis  */
-			//USE SYNTH
-			if(tms->t_display_st->curr_frame != tms->last_frame) {
-				tms->curr_active_timeslot = t_phy_state.time.tn;
-				tms->last_frame = tms->t_display_st->curr_frame;
-			}
-			if(tms->curr_active_timeslot == t_phy_state.time.tn) {
+
+			/* Only decode and output if this timeslot was selected */
+			if (should_decode) {
+				int16_t block[690];
+				/* Generate a block */
+				memset(block, 0x00, sizeof(int16_t) * 690);
+				for (int i = 0; i < 6; i++)
+					block[115*i] = 0x6b21 + i;
+
+				for (int i = 0; i < 114; i++)
+					block[1+i] = type4[i] ? -127 : 127;
+
+				for (int i = 0; i < 114; i++)
+					block[116+i] = type4[114+i] ? -127 : 127;
+
+				for (int i = 0; i < 114; i++)
+					block[231+i] = type4[228+i] ? -127 : 127;
+
+				for (int i = 0; i < 90; i++)
+					block[346+i] = type4[342+i] ? -127 : 127;
+
+				//decoding the speech using the etsi codec
+
+				int16_t interleaved_coded_array[432]; /*time-slot length at 7.2 kb/s*/
+				int16_t  Coded_array[432];
+				int16_t  Reordered_array[286];   /* 2 frames vocoder + 8 + 4 */
+				//block1
+				for(int i = 0; i < 114; i++) {
+					interleaved_coded_array[0+i] = block[1+i];
+				}
+				//block2
+				for(int i = 0; i < 114; i++) {
+					interleaved_coded_array[114+i] = block[(161-45)+i];
+				}
+				//block3
+				for(int i = 0; i < 114; i++) {
+					interleaved_coded_array[(114*2)+i] = block[(321-45-45)+i];
+				}
+				//block4
+				for(int i = 0; i < 90; i++) {
+					interleaved_coded_array[(114*3)+i] = block[(481-45-45-45)+i];
+				}
+
+				for(int i = 0; i < 432; i++) {
+					if((interleaved_coded_array[i] & 0x0080) == 0x0080) {
+						interleaved_coded_array[i] = interleaved_coded_array[i] | 0xFF00;
+					}
+				}
+				Desinterleaving_Speech(interleaved_coded_array, Coded_array);
+				bool corrupted = Channel_Decoding(tms->codec_first_pass, 0, Coded_array, Reordered_array);
+				tms->codec_first_pass = false;
+				int16_t cdecoder_output[276];
+				cdecoder_output[0] = corrupted;
+				for(int i = 0; i < 137; i++) {
+					cdecoder_output[1+i] = Reordered_array[i];
+				}
+				cdecoder_output[138] = corrupted;
+				for(int i = 0; i < 137; i++) {
+					cdecoder_output[139+i] = Reordered_array[137+i];
+				}
+
+				int16_t parm[24];
+				int16_t synth[480];
+				int16_t* synth_p2 = &(synth[240]);
+				int16_t serial[138];
+				for(int i = 0; i < 138; i++) {
+					serial[i] = cdecoder_output[i];
+				}
+				Bits2prm_Tetra(serial, parm);	/* serial to parameters */
+				Decod_Tetra(parm, synth);		/* decoder */
+				Post_Process(synth, (int16_t)240);	/* Post processing of synthesis  */
+				for(int i = 0; i < 138; i++) {
+					serial[i] = cdecoder_output[i+138];
+				}
+				Bits2prm_Tetra(serial, parm);	/* serial to parameters */
+				Decod_Tetra(parm, synth_p2);		/* decoder */
+				Post_Process(synth_p2, (int16_t)240);	/* Post processing of synthesis  */
+
+				/* Output the decoded voice */
 				tms->put_voice_data(tms->put_voice_data_ctx, 480, synth);
 			}
 		}

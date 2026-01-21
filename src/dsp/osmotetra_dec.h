@@ -8,6 +8,7 @@
 extern "C" {
     #include "tetra_common.h"
     #include "crypto/tetra_crypto.h"
+    #include "tetra_call_tracker.h"
     #include <phy/tetra_burst.h>
     #include <phy/tetra_burst_sync.h>
     #include "c-code/channel.h"
@@ -23,11 +24,12 @@ namespace dsp {
         
         ~osmotetradec() {
             free(tms->fragslots);
+            free(tms->call_tracker);
             free(trs);
             free(tms->t_display_st);
             free(tms->tcs);
             free(tms);
-            
+
             free(conv_data);
             // talloc_free(trs);
             // talloc_free(tms->t_display_st);
@@ -66,6 +68,10 @@ namespace dsp {
             memset(trs, 0, sizeof(struct tetra_rx_state));
             tms->fragslots = (struct fragslot*)malloc(sizeof(struct fragslot)*FRAGSLOT_NR_SLOTS);
             memset(tms->fragslots, 0, sizeof(struct fragslot)*FRAGSLOT_NR_SLOTS);
+
+            /* Initialize call tracker for mute encrypted calls feature */
+            tms->call_tracker = (struct tetra_call_tracker*)malloc(sizeof(struct tetra_call_tracker));
+            tetra_call_tracker_init(tms->call_tracker);
 
             conv_data = (float*)malloc(sizeof(float)*STREAM_BUFFER_SIZE);
             memset(conv_data, 0, sizeof(float)*STREAM_BUFFER_SIZE);
@@ -177,6 +183,37 @@ namespace dsp {
         }
         bool getRegMandatory() {
             return tms->t_display_st->reg_mandatory;
+        }
+
+        /* Mute Encrypted Calls feature methods */
+        void setMuteEncrypted(bool mute) {
+            if (tms->call_tracker) {
+                tetra_call_tracker_set_mute_encrypted(tms->call_tracker, mute);
+            }
+        }
+
+        bool getMuteEncrypted() {
+            if (tms->call_tracker) {
+                return tetra_call_tracker_get_mute_encrypted(tms->call_tracker);
+            }
+            return false;
+        }
+
+        bool getTimeslotEncrypted(int ts) {
+            if (ts < 0 || ts >= 4) return false;
+            return tms->t_display_st->timeslot_encrypted[ts];
+        }
+
+        int getSelectedTimeslot() {
+            if (tms->call_tracker) {
+                return tms->call_tracker->selected_timeslot;
+            }
+            return -1;
+        }
+
+        int getCallState(int ts) {
+            if (ts < 0 || ts >= 4 || !tms->call_tracker) return 0;
+            return (int)tetra_call_tracker_get_state(tms->call_tracker, ts);
         }
 
         inline int process(int count, const uint8_t* in, float* out)  {

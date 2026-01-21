@@ -65,11 +65,15 @@ public:
             config.conf[name]["hostname"] = "localhost";
             config.conf[name]["port"] = 8355;
             config.conf[name]["sending"] = false;
+            config.conf[name]["muteEncrypted"] = false;
         }
         decoder_mode = config.conf[name]["mode"];
         strcpy(hostname, std::string(config.conf[name]["hostname"]).c_str());
         port = config.conf[name]["port"];
         bool startNow = config.conf[name]["sending"];
+        if (config.conf[name].contains("muteEncrypted")) {
+            muteEncrypted = config.conf[name]["muteEncrypted"];
+        }
         config.release(true);
 
         vfo = sigpath::vfoManager.createVFO(name, ImGui::WaterfallVFO::REF_CENTER, 0, VFO_BANDWIDTH, VFO_SAMPLERATE, VFO_BANDWIDTH, VFO_BANDWIDTH, true);
@@ -186,6 +190,8 @@ private:
             //osmo-tetra
             demodSink.stop();
             osmotetradecoder.start();
+            // Apply mute encrypted setting
+            osmotetradecoder.setMuteEncrypted(muteEncrypted);
         } else {
             //network syms
             osmotetradecoder.stop();
@@ -320,6 +326,50 @@ private:
             ImGui::TextColored(_this->osmotetradecoder.getPriorityCell() ? on_color : off_color, "Priority cell");
             ImGui::TextColored(_this->osmotetradecoder.getDeregMandatory() ? on_color : off_color, "Dereg req.  ");ImGui::SameLine();
             ImGui::TextColored(_this->osmotetradecoder.getRegMandatory() ? on_color : off_color, "Reg req.");
+
+            /* Mute Encrypted Calls feature */
+            ImGui::Separator();
+            if (ImGui::Checkbox(CONCAT("Mute Encrypted Calls##_", _this->name), &_this->muteEncrypted)) {
+                _this->osmotetradecoder.setMuteEncrypted(_this->muteEncrypted);
+                config.acquire();
+                config.conf[_this->name]["muteEncrypted"] = _this->muteEncrypted;
+                config.release(true);
+            }
+
+            /* Per-timeslot encryption status display */
+            ImGui::Text("Encryption: ");
+            int selected_ts = _this->osmotetradecoder.getSelectedTimeslot();
+            for(int i = 0; i < 4; i++) {
+                int ts_content = _this->osmotetradecoder.getTimeslotContent(i);
+                bool is_voice = (ts_content == 4); /* 4 = VOICE */
+                bool is_encrypted = _this->osmotetradecoder.getTimeslotEncrypted(i);
+                bool is_selected = (i == selected_ts);
+
+                ImGui::SameLine();
+                if (is_selected && is_voice) {
+                    ImGui::TextColored(ImVec4(0.95, 0.95, 0.05, 1.0), "[");
+                } else {
+                    ImGui::Text(" ");
+                }
+                ImGui::SameLine(0, 0);
+                if (!is_voice) {
+                    /* Not voice - show as idle */
+                    ImGui::TextColored(ImVec4(0.5, 0.5, 0.5, 1.0), " --  ");
+                } else if (is_encrypted) {
+                    /* Encrypted voice */
+                    ImGui::TextColored(ImVec4(0.95, 0.35, 0.05, 1.0), "ENCR ");
+                } else {
+                    /* Clear voice */
+                    ImGui::TextColored(ImVec4(0.05, 0.95, 0.05, 1.0), "CLEAR");
+                }
+                ImGui::SameLine(0, 0);
+                if (is_selected && is_voice) {
+                    ImGui::TextColored(ImVec4(0.95, 0.95, 0.05, 1.0), "]");
+                } else {
+                    ImGui::Text(" ");
+                }
+            }
+
             if(crc_failed) {
                 style::endDisabled();
             }
@@ -450,6 +500,7 @@ private:
 
 
     int decoder_mode = 0;
+    bool muteEncrypted = false;
 
 
     //Sequences from osmo-tetra-sq5bpf source

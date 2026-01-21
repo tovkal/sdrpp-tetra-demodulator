@@ -32,6 +32,7 @@
 #include "tetra_prim.h"
 #include "tetra_upper_mac.h"
 #include "tetra_mac_pdu.h"
+#include "tetra_call_tracker.h"
 // #include "tetra_llc_pdu.h"
 // #include "tetra_llc.h"
 
@@ -268,6 +269,23 @@ static int rx_resrc(struct tetra_tmvsap_prim *tmvp, struct tetra_mac_state *tms)
 	tms->ssi = rsd.addr.ssi;
 	tms->usage_marker = rsd.addr.usage_marker;
 	tms->addr_type = rsd.addr.type;
+
+	/* Store MAC encryption mode and update call tracker (only for traffic channels) */
+	tms->cur_encryption_mode = rsd.encryption_mode;
+	tms->cur_timeslot = tmvp->u.unitdata.tdma_time.tn - 1; /* Convert 1-4 to 0-3 */
+
+	/* Update call tracker immediately when we see MAC-RESOURCE with encryption info.
+	 * This is critical because voice output happens BEFORE MAC parsing in the burst,
+	 * so we need the tracker to have the correct encryption state from the previous
+	 * MAC-RESOURCE on this timeslot. */
+	if (tms->call_tracker && tms->cur_burst.is_traffic && tms->cur_timeslot >= 0 && tms->cur_timeslot < 4) {
+		tetra_call_tracker_update_mac_encryption(tms->call_tracker, tms->cur_timeslot, rsd.encryption_mode);
+		tms->t_display_st->timeslot_encrypted[tms->cur_timeslot] = !tetra_call_tracker_is_clear(tms->call_tracker, tms->cur_timeslot);
+		fprintf(stderr, "[MUTE_DEBUG] rx_resrc: TS=%d encr_mode=%d is_encr=%d mute=%d\n",
+			tms->cur_timeslot, rsd.encryption_mode,
+			tms->t_display_st->timeslot_encrypted[tms->cur_timeslot],
+			tms->call_tracker->mute_encrypted);
+	}
 
 	if (msgb_l2len(msg) == 0)
 		goto out; /* No l2 data */

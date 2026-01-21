@@ -46,4 +46,77 @@ enum tetra_cmce_pdu_type_u {
 
 const char *tetra_get_cmce_pdut_name(uint16_t pdut, int uplink);
 
+/* Basic Service Information element (14.8.4)
+ * Contains circuit mode type, encryption flag, and communication type */
+struct tetra_basic_service_info {
+	uint8_t circuit_mode_type;    /* 4 bits */
+	uint8_t encryption_flag;      /* 1 bit - THE CRITICAL FLAG */
+	uint8_t communication_type;   /* 2 bits */
+	uint8_t slots_per_frame;      /* 2 bits (for circuit mode) */
+	uint8_t speech_service;       /* 4 bits (if circuit mode) */
+};
+
+/* D-SETUP decoded structure (14.7.1.8) */
+struct tetra_cmce_d_setup_decoded {
+	uint16_t call_identifier;     /* 14 bits */
+	uint8_t call_timeout;         /* 4 bits */
+	uint8_t hook_method_sel;      /* 1 bit */
+	uint8_t simplex_duplex;       /* 1 bit */
+	uint8_t call_priority;        /* 4 bits */
+	uint8_t encryption_control;   /* 1 bit - CRITICAL FLAG */
+	struct tetra_basic_service_info basic_service;
+	uint8_t valid;                /* 1 if successfully decoded */
+};
+
+/* D-CONNECT decoded structure (14.7.1.3) */
+struct tetra_cmce_d_connect_decoded {
+	uint16_t call_identifier;     /* 14 bits */
+	uint8_t call_timeout;         /* 4 bits */
+	uint8_t hook_method_sel;      /* 1 bit */
+	uint8_t simplex_duplex;       /* 1 bit */
+	uint8_t transmission_grant;   /* 2 bits */
+	uint8_t transmission_req_per; /* 1 bit */
+	uint8_t call_ownership;       /* 1 bit */
+	uint8_t encryption_control;   /* 1 bit - CRITICAL FLAG */
+	struct tetra_basic_service_info basic_service;
+	uint8_t valid;
+};
+
+/* D-TX_GRANTED decoded structure (14.7.1.12) */
+struct tetra_cmce_d_tx_granted_decoded {
+	uint16_t call_identifier;     /* 14 bits */
+	uint8_t transmission_grant;   /* 2 bits */
+	uint8_t transmission_req_per; /* 1 bit */
+	uint8_t encryption_control;   /* 1 bit - CRITICAL FLAG */
+	uint8_t valid;
+};
+
+/* D-RELEASE decoded structure (14.7.1.6) */
+struct tetra_cmce_d_release_decoded {
+	uint16_t call_identifier;     /* 14 bits */
+	uint8_t disconnect_cause;     /* 5 bits */
+	uint8_t valid;
+};
+
+/* Decode Basic Service Info element
+ * bits: pointer to start of element
+ * len: available bits
+ * returns: number of bits consumed, or negative on error */
+int cmce_decode_basic_service_info(struct tetra_basic_service_info *bsi, const uint8_t *bits, int len);
+
+/* Decode D-SETUP PDU
+ * bits: pointer to start of PDU (after protocol discriminator + PDU type)
+ * len: available bits
+ * returns: number of bits consumed, or negative on error */
+int cmce_decode_d_setup(struct tetra_cmce_d_setup_decoded *setup, const uint8_t *bits, int len);
+
+/* Decode D-CONNECT PDU */
+int cmce_decode_d_connect(struct tetra_cmce_d_connect_decoded *conn, const uint8_t *bits, int len);
+
+/* Decode D-TX_GRANTED PDU */
+int cmce_decode_d_tx_granted(struct tetra_cmce_d_tx_granted_decoded *txg, const uint8_t *bits, int len);
+
+/* Decode D-RELEASE PDU */
+int cmce_decode_d_release(struct tetra_cmce_d_release_decoded *rel, const uint8_t *bits, int len);
+
 #endif /* TETRA_CMCE_PDU_H */
